@@ -84,6 +84,9 @@ class HardcoverAPI:
             
             data = response.json()
             
+            # Log full response for debugging
+            logger.debug(f"Full API response: {json.dumps(data, indent=2)[:1000]}")
+            
             # Check for GraphQL errors
             if "errors" in data:
                 logger.error(f"GraphQL errors: {data['errors']}")
@@ -95,23 +98,48 @@ class HardcoverAPI:
             
             logger.info(f"Got {len(results_json)} raw results")
             
-            # Parse JSON strings
+            # Log the type and sample of first result
+            if results_json:
+                logger.debug(f"Type of first result: {type(results_json[0])}")
+                logger.debug(f"First raw result (first 200 chars): '{str(results_json[0])[:200]}'")
+                logger.debug(f"First raw result repr: {repr(results_json[0])[:200]}")
+            
+            # Check if results are already objects or strings
             parsed_results = []
-            for result_str in results_json:
+            for i, result in enumerate(results_json):
                 try:
-                    parsed = json.loads(result_str)
-                    parsed_results.append(parsed)
+                    # Check if it's already a dict
+                    if isinstance(result, dict):
+                        logger.debug(f"Result {i} is already a dict")
+                        parsed_results.append(result)
+                    # Check if it's a non-empty string
+                    elif isinstance(result, str) and result.strip():
+                        logger.debug(f"Result {i} is a string, parsing...")
+                        parsed = json.loads(result)
+                        parsed_results.append(parsed)
+                    # Skip empty strings
+                    elif isinstance(result, str) and not result.strip():
+                        logger.warning(f"Result {i} is an empty string, skipping")
+                        continue
+                    else:
+                        logger.warning(f"Result {i} has unexpected type: {type(result)}")
+                        
                 except json.JSONDecodeError as e:
-                    logger.error(f"Error parsing result: {e}")
+                    logger.error(f"Error parsing result {i}: {e}")
+                    logger.error(f"Problematic result: {repr(result)[:200]}")
                     continue
             
             logger.info(f"Parsed {len(parsed_results)} results")
+            
+            # Log first parsed result if available
+            if parsed_results:
+                logger.debug(f"First parsed result: {json.dumps(parsed_results[0], indent=2)[:500]}")
+            
             return parsed_results
             
         except Exception as e:
             logger.error(f"Error searching: {e}", exc_info=True)
             return []
-
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
