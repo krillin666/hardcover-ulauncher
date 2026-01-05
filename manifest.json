@@ -1,25 +1,33 @@
 {
-  "required_api_version": "^2.0.0",
-  "name": "Hardcover Search",
-  "description": "Search for books on Hardcover.app",
-  "developer_name": "krillin666",
+  "required_api_version": "2",
+  "name": "Hardcover",
+  "description": "Search and track books on Hardcover",
+  "developer_name": "Your Name",
   "icon": "images/icon.png",
   "options": {
-    "query_debounce": 0.3
+    "query_debounce": 0.5
   },
   "preferences": [
     {
+      "id": "hc_keyword",
+      "type": "keyword",
+      "name": "Hardcover",
+      "description": "Search Hardcover",
+      "default_value": "hc"
+    },
+    {
       "id": "api_token",
       "type": "input",
-      "name": "API Token",
-      "description": "Your Hardcover API Bearer Token (found at hardcover.app/account/api)",
+      "name": "Hardcover API Token",
+      "description": "Your Hardcover API token from https://hardcover.app/account",
       "default_value": ""
     },
     {
-      "id": "kw",
-      "type": "keyword",
-      "name": "Hardcover Keyword",
-      "default_value": "hc"
+      "id": "results_limit",
+      "type": "input",
+      "name": "Results Limit",
+      "description": "Maximum number of results to show",
+      "default_value": "10"
     }
   ]
 }
