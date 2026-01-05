@@ -1,8 +1,8 @@
 {
   "required_api_version": "2",
   "name": "Hardcover",
-  "description": "Search and track books, authors, series, and lists on Hardcover",
-  "developer_name": "krillin666",
+  "description": "Search books, authors, series, and lists on Hardcover",
+  "developer_name": "Your Name",
   "icon": "images/icon.png",
   "options": {
     "query_debounce": 0.5
@@ -18,15 +18,22 @@
     {
       "id": "api_token",
       "type": "input",
-      "name": "Hardcover API Token (Optional)",
-      "description": "API token from https://hardcover.app/account (optional, but recommended to avoid rate limits)",
+      "name": "Hardcover API Token",
+      "description": "Your API token from https://hardcover.app/account",
+      "default_value": ""
+    },
+    {
+      "id": "user_id",
+      "type": "input",
+      "name": "User ID",
+      "description": "Your Hardcover user ID (found by running 'hc me' command)",
       "default_value": ""
     },
     {
       "id": "results_limit",
       "type": "input",
       "name": "Results Limit",
-      "description": "Maximum number of results to show",
+      "description": "Maximum number of results",
       "default_value": "10"
     }
   ]
