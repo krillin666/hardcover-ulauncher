@@ -137,21 +137,13 @@ class HardcoverAPI:
         Add a book to user's library
         status_id: 1=Want to Read, 2=Currently Reading, 3=Read, 4=Paused, 5=DNF, 6=Ignored
         """
+        # Try the correct Hardcover mutation syntax
         mutation = """
-        mutation AddBook($book_id: Int!, $status_id: Int!) {
-          insert_user_books_one(
-            object: {
-              book_id: $book_id,
-              status_id: $status_id
-            }
-          ) {
+        mutation CreateUserBook($book_id: Int!, $status_id: Int!) {
+          user_books_create(book_id: $book_id, status_id: $status_id) {
             id
-            book {
-              title
-            }
-            status {
-              name
-            }
+            book_id
+            status_id
           }
         }
         """
@@ -163,6 +155,9 @@ class HardcoverAPI:
                 "status_id": status_id
             }
         }
+        
+        logger.info(f"Adding book {book_id} with status {status_id}")
+        logger.debug(f"Mutation payload: {json.dumps(payload, indent=2)}")
         
         try:
             response = requests.post(
@@ -184,7 +179,7 @@ class HardcoverAPI:
                 logger.error(f"GraphQL errors: {data['errors']}")
                 return {"success": False, "error": str(data['errors'])}
             
-            result = data.get("data", {}).get("insert_user_books_one", {})
+            result = data.get("data", {}).get("user_books_create", {})
             if result:
                 return {"success": True, "data": result}
             else:
