@@ -33,7 +33,6 @@ class HardcoverAPI:
         }
         
         if self.api_token:
-            # Format exactly like the working curl command
             self.headers["Authorization"] = f"Bearer {self.api_token}"
             logger.info(f"Token length: {len(self.api_token)}")
             logger.debug(f"Authorization header: Bearer {self.api_token[:20]}...{self.api_token[-20:]}")
@@ -84,62 +83,41 @@ class HardcoverAPI:
             
             data = response.json()
             
-            # Log full response for debugging
-            logger.debug(f"Full API response: {json.dumps(data, indent=2)[:1000]}")
-            
             # Check for GraphQL errors
             if "errors" in data:
                 logger.error(f"GraphQL errors: {data['errors']}")
                 return []
             
-            # Get results
+            # Get the Typesense results structure
             search_data = data.get("data", {}).get("search", {})
-            results_json = search_data.get("results", [])
+            results_obj = search_data.get("results", {})
             
-            logger.info(f"Got {len(results_json)} raw results")
+            # The actual results are in results.hits[].document
+            hits = results_obj.get("hits", [])
             
-            # Log the type and sample of first result
-            if results_json:
-                logger.debug(f"Type of first result: {type(results_json[0])}")
-                logger.debug(f"First raw result (first 200 chars): '{str(results_json[0])[:200]}'")
-                logger.debug(f"First raw result repr: {repr(results_json[0])[:200]}")
+            logger.info(f"Found {results_obj.get('found', 0)} total results")
+            logger.info(f"Got {len(hits)} hits in this page")
             
-            # Check if results are already objects or strings
+            # Extract documents from hits
             parsed_results = []
-            for i, result in enumerate(results_json):
-                try:
-                    # Check if it's already a dict
-                    if isinstance(result, dict):
-                        logger.debug(f"Result {i} is already a dict")
-                        parsed_results.append(result)
-                    # Check if it's a non-empty string
-                    elif isinstance(result, str) and result.strip():
-                        logger.debug(f"Result {i} is a string, parsing...")
-                        parsed = json.loads(result)
-                        parsed_results.append(parsed)
-                    # Skip empty strings
-                    elif isinstance(result, str) and not result.strip():
-                        logger.warning(f"Result {i} is an empty string, skipping")
-                        continue
-                    else:
-                        logger.warning(f"Result {i} has unexpected type: {type(result)}")
-                        
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error parsing result {i}: {e}")
-                    logger.error(f"Problematic result: {repr(result)[:200]}")
-                    continue
+            for i, hit in enumerate(hits):
+                document = hit.get("document", {})
+                if document:
+                    parsed_results.append(document)
+                else:
+                    logger.warning(f"Hit {i} has no document")
             
-            logger.info(f"Parsed {len(parsed_results)} results")
+            logger.info(f"Extracted {len(parsed_results)} documents")
             
-            # Log first parsed result if available
             if parsed_results:
-                logger.debug(f"First parsed result: {json.dumps(parsed_results[0], indent=2)[:500]}")
+                logger.debug(f"First result keys: {list(parsed_results[0].keys())[:10]}")
             
             return parsed_results
             
         except Exception as e:
             logger.error(f"Error searching: {e}", exc_info=True)
             return []
+
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
@@ -248,6 +226,7 @@ def create_book_item(book):
     
     release_year = book.get("release_year", "")
     rating = book.get("rating", "")
+    users_count = book.get("users_count", 0)
     
     desc_parts = []
     if authors_str:
@@ -255,7 +234,9 @@ def create_book_item(book):
     if release_year:
         desc_parts.append(str(release_year))
     if rating:
-        desc_parts.append(f"⭐ {rating}")
+        desc_parts.append(f"⭐ {rating:.1f}")
+    if users_count:
+        desc_parts.append(f"👥 {users_count}")
     
     description = " | ".join(desc_parts) if desc_parts else "Book"
 
@@ -273,7 +254,15 @@ def create_author_item(author):
     slug = author.get("slug", "")
     books_count = author.get("books_count", 0)
     
-    description = f"📚 {books_count} books" if books_count else "Author"
+    # Get some book titles
+    books = author.get("books", [])
+    if isinstance(books, list) and books:
+        books_preview = ", ".join(books[:3])
+        if len(books) > 3:
+            books_preview += "..."
+        description = f"📚 {books_count} books | {books_preview}"
+    else:
+        description = f"📚 {books_count} books"
 
     return ExtensionResultItem(
         icon='images/icon.png',
