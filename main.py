@@ -28,12 +28,12 @@ class HardcoverAPI:
     """Wrapper for Hardcover GraphQL API"""
 
     def __init__(self, api_token):
-        self.api_token = api_token
+        self.api_token = api_token.strip() if api_token else ""
         self.headers = {
             "Content-Type": "application/json",
         }
-        if api_token:
-            self.headers["Authorization"] = f"Bearer {api_token}"
+        # Note: Search API doesn't require authentication
+        # Auth is only needed for mutations (adding books, updating status, etc.)
 
     def search(self, query, query_type="Book", per_page=10, page=1):
         """
@@ -152,10 +152,6 @@ class KeywordQueryEventListener(EventListener):
         
         logger.info(f"Received query: '{query}'")
         logger.info(f"API token present: {bool(api_token)}")
-        
-        # API token is now optional - just log a warning if missing
-        if not api_token:
-            logger.warning("No API token set - you may hit rate limits")
 
         try:
             limit = int(extension.preferences.get("results_limit", "10"))
