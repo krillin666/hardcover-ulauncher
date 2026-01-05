@@ -137,57 +137,124 @@ class HardcoverAPI:
         Add a book to user's library
         status_id: 1=Want to Read, 2=Currently Reading, 3=Read, 4=Paused, 5=DNF, 6=Ignored
         """
-        # Try the correct Hardcover mutation syntax
-        mutation = """
-        mutation CreateUserBook($book_id: Int!, $status_id: Int!) {
-          user_books_create(book_id: $book_id, status_id: $status_id) {
-            id
-            book_id
-            status_id
-          }
-        }
-        """
         
-        payload = {
-            "query": mutation,
-            "variables": {
-                "book_id": book_id,
-                "status_id": status_id
-            }
-        }
+        # Try multiple potential mutation names
+        mutations_to_try = [
+            # Attempt 1: Snake case insert
+            {
+                "name": "insert_user_book",
+                "query": """
+                mutation CreateUserBook($book_id: Int!, $status_id: Int!) {
+                  insert_user_book(object: {book_id: $book_id, status_id: $status_id}) {
+                    id
+                    book_id
+                    status_id
+                  }
+                }
+                """,
+                "result_path": "insert_user_book"
+            },
+            # Attempt 2: Camel case create
+            {
+                "name": "createUserBook",
+                "query": """
+                mutation CreateUserBook($book_id: Int!, $status_id: Int!) {
+                  createUserBook(book_id: $book_id, status_id: $status_id) {
+                    id
+                    book_id
+                    status_id
+                  }
+                }
+                """,
+                "result_path": "createUserBook"
+            },
+            # Attempt 3: user_books_create
+            {
+                "name": "user_books_create",
+                "query": """
+                mutation CreateUserBook($book_id: Int!, $status_id: Int!) {
+                  user_books_create(book_id: $book_id, status_id: $status_id) {
+                    id
+                    book_id
+                    status_id
+                  }
+                }
+                """,
+                "result_path": "user_books_create"
+            },
+            # Attempt 4: Using input object
+            {
+                "name": "insert_user_book_with_input",
+                "query": """
+                mutation CreateUserBook($input: user_books_insert_input!) {
+                  insert_user_book(object: $input) {
+                    id
+                    book_id
+                    status_id
+                  }
+                }
+                """,
+                "result_path": "insert_user_book",
+                "use_input": True
+            },
+        ]
         
         logger.info(f"Adding book {book_id} with status {status_id}")
-        logger.debug(f"Mutation payload: {json.dumps(payload, indent=2)}")
         
-        try:
-            response = requests.post(
-                HARDCOVER_API_URL,
-                json=payload,
-                headers=self.headers,
-                timeout=10
-            )
+        for attempt in mutations_to_try:
+            logger.info(f"Trying mutation: {attempt['name']}")
             
-            logger.info(f"Add book response status: {response.status_code}")
-            logger.debug(f"Response: {response.text[:500]}")
-            
-            if response.status_code != 200:
-                return {"success": False, "error": f"HTTP {response.status_code}"}
-            
-            data = response.json()
-            
-            if "errors" in data:
-                logger.error(f"GraphQL errors: {data['errors']}")
-                return {"success": False, "error": str(data['errors'])}
-            
-            result = data.get("data", {}).get("user_books_create", {})
-            if result:
-                return {"success": True, "data": result}
+            # Prepare variables
+            if attempt.get("use_input"):
+                variables = {
+                    "input": {
+                        "book_id": book_id,
+                        "status_id": status_id
+                    }
+                }
             else:
-                return {"success": False, "error": "No data returned"}
+                variables = {
+                    "book_id": book_id,
+                    "status_id": status_id
+                }
+            
+            payload = {
+                "query": attempt["query"],
+                "variables": variables
+            }
+            
+            try:
+                response = requests.post(
+                    HARDCOVER_API_URL,
+                    json=payload,
+                    headers=self.headers,
+                    timeout=10
+                )
                 
-        except Exception as e:
-            logger.error(f"Error adding book: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
+                logger.debug(f"Response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    logger.warning(f"HTTP {response.status_code} for {attempt['name']}")
+                    continue
+                
+                data = response.json()
+                logger.debug(f"Response: {json.dumps(data, indent=2)[:500]}")
+                
+                if "errors" in data:
+                    logger.warning(f"GraphQL errors for {attempt['name']}: {data['errors']}")
+                    continue
+                
+                result = data.get("data", {}).get(attempt["result_path"], {})
+                if result:
+                    logger.info(f"Success with mutation: {attempt['name']}")
+                    return {"success": True, "data": result}
+                    
+            except Exception as e:
+                logger.error(f"Exception with {attempt['name']}: {e}")
+                continue
+        
+        # If all attempts failed, return error
+        return {"success": False, "error": "All mutation attempts failed. Check logs for details."}
 
     def search(self, query, query_type="Book", per_page=10, page=1):
         """
