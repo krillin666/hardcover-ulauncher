@@ -68,6 +68,9 @@ class HardcoverAPI:
             }
         }
 
+        logger.info(f"Searching for '{query}' (type: {query_type}, limit: {per_page})")
+        logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
+
         try:
             response = requests.post(
                 HARDCOVER_API_URL,
@@ -75,29 +78,54 @@ class HardcoverAPI:
                 headers=self.headers,
                 timeout=10
             )
+            
+            logger.info(f"Response status: {response.status_code}")
+            logger.debug(f"Response headers: {response.headers}")
+            
             response.raise_for_status()
             data = response.json()
             
+            logger.debug(f"Full response data: {json.dumps(data, indent=2)}")
+            
+            # Check for errors in GraphQL response
+            if "errors" in data:
+                logger.error(f"GraphQL errors: {data['errors']}")
+                return []
+            
             # Parse results which come as JSON strings
             search_data = data.get("data", {}).get("search", {})
+            logger.info(f"Search data keys: {search_data.keys() if search_data else 'None'}")
+            
             results_json = search_data.get("results", [])
+            logger.info(f"Number of raw results: {len(results_json)}")
+            
+            if results_json:
+                logger.debug(f"First raw result: {results_json[0][:200] if results_json[0] else 'Empty'}")
             
             # Parse each result from JSON string
             parsed_results = []
-            for result_str in results_json:
+            for i, result_str in enumerate(results_json):
                 try:
-                    parsed_results.append(json.loads(result_str))
+                    parsed = json.loads(result_str)
+                    parsed_results.append(parsed)
+                    if i == 0:
+                        logger.debug(f"First parsed result: {json.dumps(parsed, indent=2)[:500]}")
                 except json.JSONDecodeError as e:
-                    logger.error(f"Error parsing result: {e}")
+                    logger.error(f"Error parsing result {i}: {e}")
+                    logger.error(f"Problematic result string: {result_str[:200]}")
                     continue
             
+            logger.info(f"Successfully parsed {len(parsed_results)} results")
             return parsed_results
             
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP Error {e.response.status_code}: {e.response.text}")
             return []
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Error searching: {e}")
+            logger.error(f"Unexpected error searching: {e}", exc_info=True)
             return []
 
     def search_books(self, query, limit=10):
@@ -122,15 +150,12 @@ class KeywordQueryEventListener(EventListener):
         query = event.get_argument() or ""
         api_token = extension.preferences.get("api_token", "")
         
+        logger.info(f"Received query: '{query}'")
+        logger.info(f"API token present: {bool(api_token)}")
+        
+        # API token is now optional - just log a warning if missing
         if not api_token:
-            return RenderResultListAction([
-                ExtensionResultItem(
-                    icon='images/icon.png',
-                    name='API Token Required',
-                    description='Please set your Hardcover API token in extension preferences',
-                    on_enter=HideWindowAction()
-                )
-            ])
+            logger.warning("No API token set - you may hit rate limits")
 
         try:
             limit = int(extension.preferences.get("results_limit", "10"))
@@ -176,43 +201,63 @@ class KeywordQueryEventListener(EventListener):
         command = parts[0].lower() if parts else ""
         search_query = parts[1] if len(parts) > 1 else query
 
+        logger.info(f"Command: '{command}', Search query: '{search_query}'")
+
         api = HardcoverAPI(api_token)
         items = []
 
-        if command in ["author", "authors"] and len(parts) > 1:
-            # Search for authors
-            authors = api.search_authors(search_query, limit)
-            for author in authors:
-                items.append(create_author_item(author))
+        try:
+            if command in ["author", "authors"] and len(parts) > 1:
+                # Search for authors
+                logger.info("Searching for authors")
+                authors = api.search_authors(search_query, limit)
+                logger.info(f"Found {len(authors)} authors")
+                for author in authors:
+                    items.append(create_author_item(author))
 
-        elif command in ["series"] and len(parts) > 1:
-            # Search for series
-            series_list = api.search_series(search_query, limit)
-            for series in series_list:
-                items.append(create_series_item(series))
+            elif command in ["series"] and len(parts) > 1:
+                # Search for series
+                logger.info("Searching for series")
+                series_list = api.search_series(search_query, limit)
+                logger.info(f"Found {len(series_list)} series")
+                for series in series_list:
+                    items.append(create_series_item(series))
 
-        elif command in ["list", "lists"] and len(parts) > 1:
-            # Search for lists
-            lists = api.search_lists(search_query, limit)
-            for list_item in lists:
-                items.append(create_list_item(list_item))
+            elif command in ["list", "lists"] and len(parts) > 1:
+                # Search for lists
+                logger.info("Searching for lists")
+                lists = api.search_lists(search_query, limit)
+                logger.info(f"Found {len(lists)} lists")
+                for list_item in lists:
+                    items.append(create_list_item(list_item))
 
-        else:
-            # Default search for books
-            # If query starts with a command but no search term, show hint
-            if command in ["author", "authors", "series", "list", "lists"] and len(parts) == 1:
-                items.append(ExtensionResultItem(
-                    icon='images/icon.png',
-                    name=f'Type a {command} name to search',
-                    description=f'Example: hc {command} <name>',
-                    on_enter=HideWindowAction()
-                ))
             else:
-                books = api.search_books(search_query, limit)
-                for book in books:
-                    items.append(create_book_item(book))
+                # Default search for books
+                if command in ["author", "authors", "series", "list", "lists"] and len(parts) == 1:
+                    items.append(ExtensionResultItem(
+                        icon='images/icon.png',
+                        name=f'Type a {command} name to search',
+                        description=f'Example: hc {command} <name>',
+                        on_enter=HideWindowAction()
+                    ))
+                else:
+                    logger.info("Searching for books")
+                    books = api.search_books(search_query, limit)
+                    logger.info(f"Found {len(books)} books")
+                    for book in books:
+                        items.append(create_book_item(book))
+
+        except Exception as e:
+            logger.error(f"Error processing search: {e}", exc_info=True)
+            items.append(ExtensionResultItem(
+                icon='images/icon.png',
+                name='Error occurred',
+                description=f'Error: {str(e)}',
+                on_enter=HideWindowAction()
+            ))
 
         if not items:
+            logger.warning("No items to display")
             items.append(ExtensionResultItem(
                 icon='images/icon.png',
                 name='No results found',
@@ -220,6 +265,7 @@ class KeywordQueryEventListener(EventListener):
                 on_enter=HideWindowAction()
             ))
 
+        logger.info(f"Returning {len(items)} items")
         return RenderResultListAction(items)
 
 
@@ -236,6 +282,8 @@ class ItemEnterEventListener(EventListener):
 
 def create_book_item(book):
     """Create an ExtensionResultItem from book data"""
+    logger.debug(f"Creating book item from: {json.dumps(book, indent=2)[:300]}")
+    
     title = book.get("title", "Unknown Title")
     slug = book.get("slug", "")
     
@@ -274,6 +322,8 @@ def create_book_item(book):
 
 def create_author_item(author):
     """Create an ExtensionResultItem from author data"""
+    logger.debug(f"Creating author item from: {json.dumps(author, indent=2)[:300]}")
+    
     name = author.get("name", "Unknown Author")
     slug = author.get("slug", "")
     books_count = author.get("books_count", 0)
@@ -299,6 +349,8 @@ def create_author_item(author):
 
 def create_series_item(series):
     """Create an ExtensionResultItem from series data"""
+    logger.debug(f"Creating series item from: {json.dumps(series, indent=2)[:300]}")
+    
     name = series.get("name", "Unknown Series")
     slug = series.get("slug", "")
     author_name = series.get("author_name", "")
@@ -333,6 +385,8 @@ def create_series_item(series):
 
 def create_list_item(list_data):
     """Create an ExtensionResultItem from list data"""
+    logger.debug(f"Creating list item from: {json.dumps(list_data, indent=2)[:300]}")
+    
     name = list_data.get("name", "Untitled List")
     slug = list_data.get("slug", "")
     books_count = list_data.get("books_count", 0)
