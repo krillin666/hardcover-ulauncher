@@ -98,6 +98,8 @@ class HardcoverAPI:
             }
         }
         
+        logger.info(f"Checking if book {book_id} is in library for user {user_id}")
+        
         try:
             response = requests.post(
                 HARDCOVER_API_URL,
@@ -106,18 +108,29 @@ class HardcoverAPI:
                 timeout=10
             )
             
+            logger.debug(f"Check library response status: {response.status_code}")
+            
             if response.status_code != 200:
+                logger.error(f"HTTP Error checking library: {response.status_code} - {response.text}")
                 return None
             
             data = response.json()
+            
+            logger.debug(f"Check library response: {json.dumps(data, indent=2)[:500]}")
+            
             if "errors" in data:
+                logger.error(f"GraphQL errors checking library: {data['errors']}")
                 return None
             
             user_books = data.get("data", {}).get("user_books", [])
+            logger.info(f"Found {len(user_books)} matching user_books entries")
+            
             return user_books[0] if user_books else None
         except Exception as e:
-            logger.error(f"Error checking book: {e}")
+            logger.error(f"Error checking book in library: {e}", exc_info=True)
             return None
+
+
 
     def add_book_to_library(self, book_id, status_id=1):
         """
@@ -480,12 +493,19 @@ def create_book_item(book, user_id, api):
     
     # Check if user has this book in library
     in_library = False
-    if user_id and api:
+    if user_id and api and book_id:
         try:
+            logger.debug(f"Checking library status for book '{title}' (ID: {book_id})")
             existing = api.check_book_in_library(int(user_id), book_id)
             in_library = existing is not None
-        except:
-            pass
+            logger.debug(f"Book in library: {in_library}")
+        except Exception as e:
+            logger.error(f"Error checking library for book {book_id}: {e}", exc_info=True)
+    else:
+        if not user_id:
+            logger.debug("User ID not set, skipping library check")
+        if not book_id:
+            logger.warning(f"Book '{title}' has no ID!")
     
     if in_library:
         description = "📚 In Library | " + description
@@ -498,7 +518,7 @@ def create_book_item(book, user_id, api):
     )
     
     # Add alternative action to add to library (Alt+Enter)
-    if user_id and not in_library:
+    if user_id and not in_library and book_id:
         item.set_action(
             ExtensionCustomAction(
                 {
@@ -513,7 +533,6 @@ def create_book_item(book, user_id, api):
         )
     
     return item
-
 
 def create_author_item(author):
     """Create item from author data"""
