@@ -1,8 +1,8 @@
 {
   "required_api_version": "2",
   "name": "Hardcover",
-  "description": "Search and track books on Hardcover",
-  "developer_name": "Your Name",
+  "description": "Search and track books, authors, series, and lists on Hardcover",
+  "developer_name": "krillin666",
   "icon": "images/icon.png",
   "options": {
     "query_debounce": 0.5
@@ -18,8 +18,8 @@
     {
       "id": "api_token",
       "type": "input",
-      "name": "Hardcover API Token",
-      "description": "Your Hardcover API token from https://hardcover.app/account",
+      "name": "Hardcover API Token (Optional)",
+      "description": "API token from https://hardcover.app/account (optional, but recommended to avoid rate limits)",
       "default_value": ""
     },
     {
