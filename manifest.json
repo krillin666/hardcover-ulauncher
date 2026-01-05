@@ -1,0 +1,25 @@
+{
+  "required_api_version": "^2.0.0",
+  "name": "Hardcover Search",
+  "description": "Search for books on Hardcover.app",
+  "developer_name": "krillin666",
+  "icon": "images/icon.png",
+  "options": {
+    "query_debounce": 0.3
+  },
+  "preferences": [
+    {
+      "id": "api_token",
+      "type": "input",
+      "name": "API Token",
+      "description": "Your Hardcover API Bearer Token (found at hardcover.app/account/api)",
+      "default_value": ""
+    },
+    {
+      "id": "kw",
+      "type": "keyword",
+      "name": "Hardcover Keyword",
+      "default_value": "hc"
+    }
+  ]
+}
