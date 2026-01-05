@@ -510,27 +510,28 @@ def create_book_item(book, user_id, api):
     if in_library:
         description = "📚 In Library | " + description
 
+    # Prepare on_alt_enter action if not in library
+    on_alt_enter = None
+    if user_id and not in_library and book_id:
+        on_alt_enter = ExtensionCustomAction(
+            {
+                "action": "add_to_library",
+                "book_id": book_id,
+                "book_title": title,
+                "user_id": user_id
+            },
+            keep_app_open=True
+        )
+        # Add hint to description
+        description += " | Alt+Enter to add"
+
     item = ExtensionResultItem(
         icon='images/icon.png',
         name=title,
         description=description,
-        on_enter=OpenUrlAction(f"{HARDCOVER_BASE_URL}/books/{slug}")
+        on_enter=OpenUrlAction(f"{HARDCOVER_BASE_URL}/books/{slug}"),
+        on_alt_enter=on_alt_enter
     )
-    
-    # Add alternative action to add to library (Alt+Enter)
-    if user_id and not in_library and book_id:
-        item.set_action(
-            ExtensionCustomAction(
-                {
-                    "action": "add_to_library",
-                    "book_id": book_id,
-                    "book_title": title,
-                    "user_id": user_id
-                },
-                keep_app_open=True
-            ),
-            for_action='alt'
-        )
     
     return item
 
