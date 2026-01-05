@@ -1,5 +1,6 @@
 import logging
 import requests
+import json
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent
@@ -9,8 +10,10 @@ from ulauncher.api.shared.action.OpenUrlAction import OpenUrlAction
 
 logger = logging.getLogger(__name__)
 
-# Standard GraphQL Endpoint
-API_ENDPOINT = "https://api.hardcover.app/v1/graphql"
+# Hardcover's public search endpoint and key
+# Sourced from Hardcover's public configuration
+TYPESENSE_URL = "https://search.hardcover.app/collections/books/documents/search"
+TYPESENSE_API_KEY = "7JRcb63AvYIo2WJvE3IzH4f8j1z9fHcC" 
 
 class HardcoverExtension(Extension):
     def __init__(self):
@@ -20,104 +23,81 @@ class HardcoverExtension(Extension):
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
         query = event.get_argument()
-        raw_token = extension.preferences['api_token']
-        api_token = raw_token.replace("Bearer ", "").strip()
-
-        if not query or not api_token:
+        
+        if not query:
             return RenderResultListAction([
                 ExtensionResultItem(
                     icon='images/icon.png',
                     name='Enter a search term',
-                    description='Please enter a book title.',
+                    description='Search for books on Hardcover...',
                     on_enter=None
                 )
             ])
 
         # ---------------------------------------------------------
-        # ATTEMPT 1: The "search_books" function (Hasura Full Text)
-        # This is the standard replacement when _ilike is banned.
+        # SEARCH STRATEGY: Typesense (External Search Engine)
         # ---------------------------------------------------------
-        graphql_query = """
-        query Search($q: String!) {
-            search_books(
-                args: {query: $q}
-                limit: 8
-            ) {
-                title
-                slug
-                contributions {
-                    author {
-                        name
-                    }
-                }
-            }
-        }
-        """
-
-        # Headers
+        
+        # 1. Mimic the browser headers to avoid "Read timed out" / 403
         headers = {
-            "Authorization": f"Bearer {api_token}",
-            "Content-Type": "application/json",
-            "User-Agent": "Ulauncher-Hardcover/1.0"
+            "X-TYPESENSE-API-KEY": TYPESENSE_API_KEY,
+            "Origin": "https://hardcover.app",
+            "Referer": "https://hardcover.app/",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
 
-        # The search_books function usually takes a simple string, no % wildcards needed
-        variables = {"q": query}
+        # 2. Configure the search parameters
+        params = {
+            "q": query,
+            "query_by": "title,author_names",
+            "sort_by": "users_read_count:desc", # Sort by popularity
+            "per_page": 8,
+            "filter_by": "users_read_count:>0"  # Filter out empty stubs if necessary
+        }
 
         try:
-            response = requests.post(
-                API_ENDPOINT,
-                json={'query': graphql_query, 'variables': variables},
-                headers=headers,
-                timeout=10
+            # We use a short timeout because search should be fast. 
+            # If it hangs, the firewall is blocking us.
+            response = requests.get(
+                TYPESENSE_URL, 
+                params=params, 
+                headers=headers, 
+                timeout=5
             )
 
             if response.status_code != 200:
-                logger.error(f"API Error: {response.status_code} - {response.text}")
+                logger.error(f"Search Error {response.status_code}: {response.text}")
                 return RenderResultListAction([
                     ExtensionResultItem(
                         icon='images/icon.png',
-                        name='API Error',
-                        description='Could not verify API token or schema.',
-                        on_enter=OpenUrlAction("https://hardcover.app/account/api")
+                        name='Search Unavailable',
+                        description=f'Status: {response.status_code}. See logs.',
+                        on_enter=OpenUrlAction("https://hardcover.app/browse")
                     )
                 ])
 
             data = response.json()
-            
-            # Check for GraphQL errors specifically (like if search_books doesn't exist)
-            if 'errors' in data:
-                logger.error(f"GraphQL Error: {data['errors']}")
-                # If search_books failed, fallback to strict match? 
-                # For now, let's just show the error to debug.
-                return RenderResultListAction([
-                    ExtensionResultItem(
-                        icon='images/icon.png',
-                        name='Search Error',
-                        description='The search query format was rejected.',
-                        on_enter=None
-                    )
-                ])
-
-            # Note: The key here is 'search_books', not 'books'
-            books = data.get('data', {}).get('search_books', [])
-            
+            hits = data.get('hits', [])
             items = []
-            for book in books:
-                title = book.get('title')
-                slug = book.get('slug')
-                
-                contributions = book.get('contributions', [])
-                author_name = "Unknown Author"
-                if contributions:
-                    author_name = contributions[0].get('author', {}).get('name', 'Unknown Author')
 
+            for hit in hits:
+                doc = hit.get('document', {})
+                title = doc.get('title')
+                slug = doc.get('slug')
+                
+                # Author handling
+                authors = doc.get('author_names', [])
+                author_text = authors[0] if authors else "Unknown Author"
+                
+                # Image handling (Typesense usually has an image_url or similar field)
+                # If available in 'doc', you can parse it here.
+                
                 book_url = f"https://hardcover.app/books/{slug}"
 
                 items.append(ExtensionResultItem(
                     icon='images/icon.png',
                     name=title,
-                    description=f"by {author_name}",
+                    description=f"by {author_text}",
                     on_enter=OpenUrlAction(book_url)
                 ))
 
@@ -125,8 +105,8 @@ class KeywordQueryEventListener(EventListener):
                 return RenderResultListAction([
                     ExtensionResultItem(
                         icon='images/icon.png',
-                        name='No results found',
-                        description=f"No books found for '{query}'",
+                        name='No books found',
+                        description=f"Try a different search term for '{query}'",
                         on_enter=OpenUrlAction(f"https://hardcover.app/books?q={query}")
                     )
                 ])
@@ -134,13 +114,13 @@ class KeywordQueryEventListener(EventListener):
             return RenderResultListAction(items)
 
         except Exception as e:
-            logger.error(f"Extension Error: {e}")
+            logger.error(f"Connection Error: {e}")
             return RenderResultListAction([
                 ExtensionResultItem(
                     icon='images/icon.png',
-                    name='Extension Error',
-                    description=str(e),
-                    on_enter=None
+                    name='Connection Failed',
+                    description='Could not reach Hardcover search server.',
+                    on_enter=OpenUrlAction("https://hardcover.app")
                 )
             ])
 
