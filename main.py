@@ -8,6 +8,8 @@ from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.OpenUrlAction import OpenUrlAction
 from ulauncher.api.shared.action.HideWindowAction import HideWindowAction
+from ulauncher.api.shared.action.ExtensionCustomAction import ExtensionCustomAction
+from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,7 @@ class HardcoverExtension(Extension):
     def __init__(self):
         super(HardcoverExtension, self).__init__()
         self.subscribe(KeywordQueryEvent, KeywordQueryEventListener())
+        self.subscribe(ItemEnterEvent, ItemEnterEventListener())
 
 
 class HardcoverAPI:
@@ -35,7 +38,148 @@ class HardcoverAPI:
         if self.api_token:
             self.headers["Authorization"] = f"Bearer {self.api_token}"
             logger.info(f"Token length: {len(self.api_token)}")
-            logger.debug(f"Authorization header: Bearer {self.api_token[:20]}...{self.api_token[-20:]}")
+
+    def get_user_info(self):
+        """Get current user information"""
+        query = """
+        query {
+          me {
+            id
+            username
+            name
+          }
+        }
+        """
+        
+        payload = {"query": query}
+        
+        try:
+            response = requests.post(
+                HARDCOVER_API_URL,
+                json=payload,
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            data = response.json()
+            if "errors" in data:
+                return None
+            
+            return data.get("data", {}).get("me", {})
+        except Exception as e:
+            logger.error(f"Error getting user info: {e}")
+            return None
+
+    def check_book_in_library(self, user_id, book_id):
+        """Check if a book is already in user's library"""
+        query = """
+        query CheckBook($user_id: Int!, $book_id: Int!) {
+          user_books(
+            where: {
+              user_id: {_eq: $user_id},
+              book_id: {_eq: $book_id}
+            }
+            limit: 1
+          ) {
+            id
+            status_id
+          }
+        }
+        """
+        
+        payload = {
+            "query": query,
+            "variables": {
+                "user_id": user_id,
+                "book_id": book_id
+            }
+        }
+        
+        try:
+            response = requests.post(
+                HARDCOVER_API_URL,
+                json=payload,
+                headers=self.headers,
+                timeout=10
+            )
+            
+            if response.status_code != 200:
+                return None
+            
+            data = response.json()
+            if "errors" in data:
+                return None
+            
+            user_books = data.get("data", {}).get("user_books", [])
+            return user_books[0] if user_books else None
+        except Exception as e:
+            logger.error(f"Error checking book: {e}")
+            return None
+
+    def add_book_to_library(self, book_id, status_id=1):
+        """
+        Add a book to user's library
+        status_id: 1=Want to Read, 2=Currently Reading, 3=Read, 4=Paused, 5=DNF, 6=Ignored
+        """
+        mutation = """
+        mutation AddBook($book_id: Int!, $status_id: Int!) {
+          insert_user_books_one(
+            object: {
+              book_id: $book_id,
+              status_id: $status_id
+            }
+          ) {
+            id
+            book {
+              title
+            }
+            status {
+              name
+            }
+          }
+        }
+        """
+        
+        payload = {
+            "query": mutation,
+            "variables": {
+                "book_id": book_id,
+                "status_id": status_id
+            }
+        }
+        
+        try:
+            response = requests.post(
+                HARDCOVER_API_URL,
+                json=payload,
+                headers=self.headers,
+                timeout=10
+            )
+            
+            logger.info(f"Add book response status: {response.status_code}")
+            logger.debug(f"Response: {response.text[:500]}")
+            
+            if response.status_code != 200:
+                return {"success": False, "error": f"HTTP {response.status_code}"}
+            
+            data = response.json()
+            
+            if "errors" in data:
+                logger.error(f"GraphQL errors: {data['errors']}")
+                return {"success": False, "error": str(data['errors'])}
+            
+            result = data.get("data", {}).get("insert_user_books_one", {})
+            if result:
+                return {"success": True, "data": result}
+            else:
+                return {"success": False, "error": "No data returned"}
+                
+        except Exception as e:
+            logger.error(f"Error adding book: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
 
     def search(self, query, query_type="Book", per_page=10, page=1):
         """
@@ -109,9 +253,6 @@ class HardcoverAPI:
             
             logger.info(f"Extracted {len(parsed_results)} documents")
             
-            if parsed_results:
-                logger.debug(f"First result keys: {list(parsed_results[0].keys())[:10]}")
-            
             return parsed_results
             
         except Exception as e:
@@ -123,6 +264,7 @@ class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
         query = event.get_argument() or ""
         api_token = extension.preferences.get("api_token", "")
+        user_id = extension.preferences.get("user_id", "")
         
         # Check if API token is set
         if not api_token or not api_token.strip():
@@ -140,12 +282,42 @@ class KeywordQueryEventListener(EventListener):
         except ValueError:
             limit = 10
 
+        # Special command to get user info
+        if query.lower() in ["me", "whoami"]:
+            api = HardcoverAPI(api_token)
+            user_info = api.get_user_info()
+            
+            if user_info:
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name=f"Hello, {user_info.get('name', user_info.get('username', 'User'))}!",
+                        description=f"User ID: {user_info.get('id')} | Username: @{user_info.get('username')} | Copy your User ID and add it to preferences",
+                        on_enter=CopyToClipboardAction(str(user_info.get('id')))
+                    )
+                ])
+            else:
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name='Error getting user info',
+                        description='Check your API token',
+                        on_enter=HideWindowAction()
+                    )
+                ])
+
         if not query:
-            return RenderResultListAction([
+            items = [
                 ExtensionResultItem(
                     icon='images/icon.png',
                     name='Search Hardcover',
                     description='Type to search for books, authors, series, or lists',
+                    on_enter=HideWindowAction()
+                ),
+                ExtensionResultItem(
+                    icon='images/icon.png',
+                    name='Get User Info',
+                    description='hc me - Get your user ID',
                     on_enter=HideWindowAction()
                 ),
                 ExtensionResultItem(
@@ -166,7 +338,17 @@ class KeywordQueryEventListener(EventListener):
                     description='hc series <name>',
                     on_enter=HideWindowAction()
                 )
-            ])
+            ]
+            
+            if user_id:
+                items.insert(1, ExtensionResultItem(
+                    icon='images/icon.png',
+                    name='Add to Library',
+                    description='Alt+Enter on any book to add to Want to Read',
+                    on_enter=HideWindowAction()
+                ))
+            
+            return RenderResultListAction(items)
 
         # Parse command
         parts = query.split(None, 1)
@@ -197,7 +379,7 @@ class KeywordQueryEventListener(EventListener):
         # Create items
         for result in results:
             if query_type == "Book":
-                items.append(create_book_item(result))
+                items.append(create_book_item(result, user_id, api))
             elif query_type == "Author":
                 items.append(create_author_item(result))
             elif query_type == "Series":
@@ -216,10 +398,66 @@ class KeywordQueryEventListener(EventListener):
         return RenderResultListAction(items)
 
 
-def create_book_item(book):
+class ItemEnterEventListener(EventListener):
+    def on_event(self, event, extension):
+        data = event.get_data()
+        action = data.get("action")
+        
+        if action == "add_to_library":
+            api_token = extension.preferences.get("api_token", "")
+            api = HardcoverAPI(api_token)
+            
+            book_id = data.get("book_id")
+            book_title = data.get("book_title")
+            user_id = data.get("user_id")
+            
+            # Check if book is already in library
+            existing = api.check_book_in_library(int(user_id), book_id)
+            
+            if existing:
+                status_names = {1: "Want to Read", 2: "Currently Reading", 3: "Read", 
+                               4: "Paused", 5: "Did Not Finish", 6: "Ignored"}
+                status_name = status_names.get(existing.get("status_id"), "Unknown")
+                
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name='Book Already in Library',
+                        description=f'"{book_title}" is already marked as "{status_name}"',
+                        on_enter=HideWindowAction()
+                    )
+                ])
+            
+            # Add book to library
+            result = api.add_book_to_library(book_id, status_id=1)
+            
+            if result.get("success"):
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name='✓ Added to Want to Read',
+                        description=f'"{book_title}" has been added to your library',
+                        on_enter=HideWindowAction()
+                    )
+                ])
+            else:
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name='Error Adding Book',
+                        description=f'Error: {result.get("error", "Unknown error")}',
+                        on_enter=HideWindowAction()
+                    )
+                ])
+        
+        return HideWindowAction()
+
+
+def create_book_item(book, user_id, api):
     """Create item from book data"""
     title = book.get("title", "Unknown Title")
     slug = book.get("slug", "")
+    book_id = book.get("id")
     
     author_names = book.get("author_names", [])
     authors_str = ", ".join(author_names) if isinstance(author_names, list) else ""
@@ -239,13 +477,42 @@ def create_book_item(book):
         desc_parts.append(f"👥 {users_count}")
     
     description = " | ".join(desc_parts) if desc_parts else "Book"
+    
+    # Check if user has this book in library
+    in_library = False
+    if user_id and api:
+        try:
+            existing = api.check_book_in_library(int(user_id), book_id)
+            in_library = existing is not None
+        except:
+            pass
+    
+    if in_library:
+        description = "📚 In Library | " + description
 
-    return ExtensionResultItem(
+    item = ExtensionResultItem(
         icon='images/icon.png',
         name=title,
         description=description,
         on_enter=OpenUrlAction(f"{HARDCOVER_BASE_URL}/books/{slug}")
     )
+    
+    # Add alternative action to add to library (Alt+Enter)
+    if user_id and not in_library:
+        item.set_action(
+            ExtensionCustomAction(
+                {
+                    "action": "add_to_library",
+                    "book_id": book_id,
+                    "book_title": title,
+                    "user_id": user_id
+                },
+                keep_app_open=True
+            ),
+            for_action='alt'
+        )
+    
+    return item
 
 
 def create_author_item(author):
