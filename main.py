@@ -138,35 +138,33 @@ class HardcoverAPI:
         status_id: 1=Want to Read, 2=Currently Reading, 3=Read, 4=Paused, 5=DNF, 6=Ignored
         rating: Optional float (0.5 to 5.0)
         """
-        # Build mutation based on whether rating is provided
-        if rating is not None:
-            mutation = f"""
-            mutation {{
-              update_user_book(book_id: {book_id}, status_id: {status_id}, rating: {rating}) {{
-                id
-                book_id
-                status_id
-                rating
-              }}
-            }}
-            """
-        else:
-            mutation = f"""
-            mutation {{
-              update_user_book(book_id: {book_id}, status_id: {status_id}) {{
-                id
-                book_id
-                status_id
-              }}
-            }}
-            """
+        # Use the correct mutation format from Hardcover developers
+        mutation = """
+        mutation ChangeBookStatus($bookId: Int!, $status: Int, $rating: Float) {
+          insert_user_book(object: {book_id: $bookId, status_id: $status, rating: $rating}) {
+            id
+            book_id
+            status_id
+            rating
+          }
+        }
+        """
         
-        payload = {
-            "query": mutation
+        variables = {
+            "bookId": book_id,
+            "status": status_id
         }
         
-        logger.info(f"Adding/updating book {book_id} with status {status_id}")
-        logger.debug(f"Mutation: {mutation}")
+        if rating is not None:
+            variables["rating"] = rating
+        
+        payload = {
+            "query": mutation,
+            "variables": variables
+        }
+        
+        logger.info(f"Adding book {book_id} with status {status_id}")
+        logger.debug(f"Mutation payload: {json.dumps(payload, indent=2)}")
         
         try:
             response = requests.post(
@@ -188,9 +186,9 @@ class HardcoverAPI:
                 logger.error(f"GraphQL errors: {data['errors']}")
                 return {"success": False, "error": str(data['errors'])}
             
-            result = data.get("data", {}).get("update_user_book", {})
+            result = data.get("data", {}).get("insert_user_book", {})
             if result:
-                logger.info(f"Successfully added/updated book {book_id}")
+                logger.info(f"Successfully added book {book_id} to library")
                 return {"success": True, "data": result}
             else:
                 return {"success": False, "error": "No data returned"}
