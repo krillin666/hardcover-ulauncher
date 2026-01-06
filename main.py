@@ -427,8 +427,23 @@ class ItemEnterEventListener(EventListener):
             book_title = data.get("book_title")
             user_id = data.get("user_id")
             
+            # Convert book_id to int
+            try:
+                book_id = int(book_id)
+                user_id = int(user_id)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid book_id or user_id: {e}")
+                return RenderResultListAction([
+                    ExtensionResultItem(
+                        icon='images/icon.png',
+                        name='Error',
+                        description='Invalid book or user ID',
+                        on_enter=HideWindowAction()
+                    )
+                ])
+            
             # Check if book is already in library
-            existing = api.check_book_in_library(int(user_id), book_id)
+            existing = api.check_book_in_library(user_id, book_id)
             
             if existing:
                 status_names = {1: "Want to Read", 2: "Currently Reading", 3: "Read", 
@@ -475,6 +490,14 @@ def create_book_item(book, user_id, api):
     slug = book.get("slug", "")
     book_id = book.get("id")
     
+    # Convert book_id to int if it's a string
+    if book_id is not None:
+        try:
+            book_id = int(book_id)
+        except (ValueError, TypeError):
+            logger.warning(f"Could not convert book_id to int: {book_id}")
+            book_id = None
+    
     author_names = book.get("author_names", [])
     authors_str = ", ".join(author_names) if isinstance(author_names, list) else ""
     
@@ -519,7 +542,7 @@ def create_book_item(book, user_id, api):
         on_alt_enter = ExtensionCustomAction(
             {
                 "action": "add_to_library",
-                "book_id": book_id,
+                "book_id": book_id,  # Already converted to int
                 "book_title": title,
                 "user_id": user_id
             },
