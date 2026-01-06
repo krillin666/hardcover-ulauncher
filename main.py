@@ -138,25 +138,38 @@ class HardcoverAPI:
         status_id: 1=Want to Read, 2=Currently Reading, 3=Read, 4=Paused, 5=DNF, 6=Ignored
         rating: Optional float (0.5 to 5.0)
         """
-        # Use the correct mutation format from Hardcover developers
-        mutation = """
-        mutation ChangeBookStatus($bookId: Int!, $status: Int, $rating: Float) {
-          insert_user_book(object: {book_id: $bookId, status_id: $status, rating: $rating}) {
-            id
-            book_id
-            status_id
-            rating
-          }
-        }
-        """
-        
-        variables = {
-            "bookId": book_id,
-            "status": status_id
-        }
-        
+        # Build mutation conditionally based on whether rating is provided
         if rating is not None:
-            variables["rating"] = rating
+            mutation = """
+            mutation ChangeBookStatus($bookId: Int!, $status: Int, $rating: numeric) {
+              insert_user_book(object: {book_id: $bookId, status_id: $status, rating: $rating}) {
+                id
+                book_id
+                status_id
+                rating
+              }
+            }
+            """
+            variables = {
+                "bookId": book_id,
+                "status": status_id,
+                "rating": rating
+            }
+        else:
+            # Simpler mutation without rating
+            mutation = """
+            mutation ChangeBookStatus($bookId: Int!, $status: Int) {
+              insert_user_book(object: {book_id: $bookId, status_id: $status}) {
+                id
+                book_id
+                status_id
+              }
+            }
+            """
+            variables = {
+                "bookId": book_id,
+                "status": status_id
+            }
         
         payload = {
             "query": mutation,
